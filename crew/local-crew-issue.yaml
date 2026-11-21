@@ -1,0 +1,216 @@
+name: local-crew-issue
+description: |
+  One member of the ProArt local crew working one issue end to end, fully on a local model.
+
+  triage (read-only) -> root cause posted on the issue -> if the fix is simple:
+  implement -> validate (type-check + tests of every touched package) -> review, up to 3 rounds
+  -> PR on the crew repo. Anything harder is labelled needs-cloud-planning with the write-up attached.
+
+  Every node runs on the local llama-server through Pi (provider pi, model from
+  ~/.archon/config.yaml). No cloud model anywhere in this workflow.
+
+  Usage: archon workflow run local-crew-issue --branch crew/issue-<n> "<fork issue number>"
+provider: pi
+
+nodes:
+  - id: fetch
+    depends_on: []
+    bash: |
+      set -euo pipefail
+      gh issue edit "$ARGUMENTS" --repo dynamous-business/archon-local-crew \
+        --add-label crew:working --remove-label crew:queued >/dev/null 2>&1 || true
+      gh issue view "$ARGUMENTS" --repo dynamous-business/archon-local-crew --json number,title,body
+
+  - id: triage
+    depends_on: [fetch]
+    allowed_tools: [read, grep, find, ls]
+    prompt: |
+      You are one agent in a crew that works through the GitHub issues of Archon, an open
+      source AI coding harness (a Bun + TypeScript monorepo, packages under packages/).
+      Your job right now is triage and root cause ONLY. Do not edit anything.
+
+      The issue:
+      $fetch.output
+
+      1. Read the code the issue is about. Find where the behaviour it describes comes from.
+         Quote real file paths and line numbers you actually opened; never guess a path.
+      2. Decide which of these it is:
+         - simple-fix: the cause is clear, the fix touches at most ~3 files and ~80 lines,
+           needs no design decision, and can be covered by a test.
+         - needs-cloud-planning: real, but needs a design decision, touches many files,
+           changes a public contract, or you are not sure of the cause.
+         - not-actionable: a question, a discussion, a duplicate, already fixed on this
+           branch, or not enough information to act on.
+      3. Write the root cause so a maintainer can verify it in two minutes.
+    output_format:
+      type: object
+      properties:
+        verdict:
+          type: string
+          enum: ['simple-fix', 'needs-cloud-planning', 'not-actionable']
+        summary:
+          type: string
+          description: One sentence, plain English, what is wrong.
+        root_cause:
+          type: string
+          description: Where and why it happens, with file:line references you read.
+        fix_plan:
+          type: string
+          description: For simple-fix, the exact change and the test that proves it. Otherwise what a planner should decide.
+        pr_title:
+          type: string
+          description: Conventional-commit PR title, under 70 characters, no issue number.
+      required: [verdict, summary, root_cause, fix_plan, pr_title]
+
+  - id: report
+    depends_on: [triage]
+    bash: |
+      set -euo pipefail
+      # GitHub calls retry: the network blipped several times overnight (11/19-20) and one
+      # timeout lost a finished triage. 4 tries, 15/30/45 s apart.
+      retry() { for i in 1 2 3 4; do "$@" && return 0; sleep $((i * 15)); done; return 1; }
+      # Model text is defused before it is posted: in a fork, '#123' resolves to the PARENT repo and
+      # puts a 'mentioned this' event on the real upstream issue (found 11/20); @name pings a person.
+      defuse() { perl -CSD -pe 's{https?://github\.com/}{https://github\x{200b}.com/}g; s{(?<![\w`])@(?=[A-Za-z0-9])}{\@\x{200b}}g; s{(?<![\w&/])#(?=\d)}{#\x{200b}}g; s{([\w.-]+/[\w.-]+)#(?=\d)}{$1#\x{200b}}g'; }
+      verdict=$triage.output.verdict
+      summary=$triage.output.summary
+      cause=$triage.output.root_cause
+      plan=$triage.output.fix_plan
+      {
+        printf '**Local crew triage** (%s running locally on an ASUS ProArt P16)\n\n' "${CREW_MODEL_LABEL:-a local model}"
+        printf '**Verdict:** %s\n\n' "$verdict"
+        printf "**What's wrong:** %s\n\n" "$summary"
+        printf '**Root cause**\n%s\n\n' "$cause"
+        printf '**Next step**\n%s\n' "$plan"
+      } | defuse > "$ARTIFACTS_DIR/triage-comment.md"
+      retry gh issue comment "$ARGUMENTS" --repo dynamous-business/archon-local-crew \
+        --body-file "$ARTIFACTS_DIR/triage-comment.md" >/dev/null
+      case "$verdict" in
+        simple-fix) label=crew:triaged ;;
+        needs-cloud-planning) label=needs-cloud-planning ;;
+        *) label=crew:not-actionable ;;
+      esac
+      gh issue edit "$ARGUMENTS" --repo dynamous-business/archon-local-crew \
+        --add-label "$label" --remove-label crew:working >/dev/null 2>&1 || true
+      echo "VERDICT=$verdict"
+
+  - id: build
+    depends_on: [report]
+    when: "$triage.output.verdict == 'simple-fix'"
+    loop_group:
+      # Both must hold: the deterministic check passed AND the reviewer is satisfied.
+      # The reviewer alone is never enough (a 9B test run argued a failing check away).
+      until_bash: 'v=$review.output.clean; c=$check.output; [ "$v" = true ] && printf "%s" "$c" | grep -q "VALIDATION: PASS"'
+      max_iterations: 2
+      nodes:
+        - id: implement
+          depends_on: []
+          prompt: |
+            Implement this fix with the smallest change that works, add or update a test that
+            fails without the fix and passes with it (skip the test only for a docs-only change),
+            then commit with a conventional-commit message. Do not write report files; your reply
+            is the only output that matters.
+
+            Stay inside this issue. Never edit, skip, or delete a test or file the fix does not
+            need, even if it fails: a failure unrelated to your change is not yours to fix here.
+            If your own test cannot pass on this machine, say so in your reply instead of
+            changing other code to make it pass.
+
+            Issue:
+            $fetch.output
+
+            Root cause (from triage):
+            $triage.output.root_cause
+
+            Plan:
+            $triage.output.fix_plan
+
+            Findings from the previous attempt (empty on the first iteration):
+            $LOOP_PREV.review.output.findings
+
+        - id: check
+          depends_on: [implement]
+          bash: |
+            # Always exit 0: a failing body node would end the loop that exists to fix it.
+            set -o pipefail
+            ok=1
+            # a fresh worktree has no node_modules; bun's global cache makes this fast after the first
+            if [ ! -d node_modules ]; then bun install --frozen-lockfile >/dev/null 2>&1 || { echo 'INSTALL FAILED'; ok=0; }; fi
+            if git diff --quiet "$BASE_BRANCH"...HEAD; then echo 'NO COMMITTED CHANGE'; ok=0; fi
+            echo '=== type-check ==='
+            bun run type-check 2>&1 | tail -30 || ok=0
+            # Tests for THIS change only: changed test files, plus the test file next to each changed
+            # source file. A whole package's suite is not used, because some suites already fail on
+            # Windows before any change (upstream issue 5835), so it could never pass here.
+            tests=""
+            for f in $(git diff --name-only --diff-filter=AM "$BASE_BRANCH"...HEAD | grep -E '^packages/.*\.tsx?$'); do
+              case "$f" in
+                *.test.ts|*.test.tsx|*.spec.ts) tests="$tests $f" ;;
+                *) for t in "${f%.*}.test.ts" "${f%.*}.test.tsx"; do [ -f "$t" ] && tests="$tests $t"; done ;;
+              esac
+            done
+            for t in $(printf '%s\n' $tests | sort -u); do
+              pkg=$(echo "$t" | cut -d/ -f1-2); rel=${t#"$pkg"/}
+              echo "=== test: $t ==="
+              (cd "$pkg" && bun test "./$rel" 2>&1 | tail -15) || ok=0
+            done
+            [ -z "$tests" ] && echo '(no test files touched or adjacent to the change)'
+            if [ "$ok" = 1 ]; then echo 'VALIDATION: PASS'; else echo 'VALIDATION: FAIL'; fi
+          timeout: 1200000
+
+        - id: review
+          depends_on: [check]
+          allowed_tools: [read, grep, find, ls, bash]
+          prompt: |
+            Validation output (type-check, plus the tests changed by or next to the diff):
+            $check.output
+
+            Review `git diff $BASE_BRANCH...HEAD` against the issue and the root cause:
+            $triage.output.root_cause
+
+            The validation above is authoritative. If it ends in `VALIDATION: FAIL`, clean is
+            false and findings says what failed and what to change.
+            clean is true only if it ends in `VALIDATION: PASS`, the diff fixes the root cause,
+            and the test really exercises the fix.
+            Otherwise findings lists what to fix in one short paragraph; it goes to the
+            implementer verbatim.
+          output_format:
+            type: object
+            properties:
+              clean:
+                type: boolean
+              findings:
+                type: string
+            required: [clean, findings]
+
+  - id: open-pr
+    depends_on: [build]
+    when: "$triage.output.verdict == 'simple-fix'"
+    bash: |
+      set -euo pipefail
+      # GitHub calls retry: the network blipped several times overnight (11/19-20) and one
+      # timeout lost a finished triage. 4 tries, 15/30/45 s apart.
+      retry() { for i in 1 2 3 4; do "$@" && return 0; sleep $((i * 15)); done; return 1; }
+      # see the report node: defuse model text so nothing links or pings the upstream repo
+      defuse() { perl -CSD -pe 's{https?://github\.com/}{https://github\x{200b}.com/}g; s{(?<![\w`])@(?=[A-Za-z0-9])}{\@\x{200b}}g; s{(?<![\w&/])#(?=\d)}{#\x{200b}}g; s{([\w.-]+/[\w.-]+)#(?=\d)}{$1#\x{200b}}g'; }
+      title=$triage.output.pr_title
+      cause=$triage.output.root_cause
+      plan=$triage.output.fix_plan
+      title=$(printf '%s' "$title" | head -1 | defuse)
+      # one commit with a defused message: the agent's own commit messages can carry #refs too
+      base=$(git merge-base HEAD "$BASE_BRANCH")
+      git reset --soft "$base"
+      git commit -q -m "$title" -m "Local crew fix for dynamous-business/archon-local-crew#$ARGUMENTS"
+      retry git push -u --force-with-lease origin HEAD >/dev/null 2>&1
+      {
+        printf 'Fixes dynamous-business/archon-local-crew#%s\n\n' "$ARGUMENTS"
+        printf 'Opened by the local agent crew (%s running locally on an ASUS ProArt P16).\n' "${CREW_MODEL_LABEL:-a local model}"
+        printf 'Needs a human review before anything merges.\n\n'
+        printf '## Root cause\n%s\n\n## Change\n%s\n' "$cause" "$plan" | defuse
+      } > "$ARTIFACTS_DIR/pr-body.md"
+      url=$(retry gh pr create --repo dynamous-business/archon-local-crew --base "$BASE_BRANCH" \
+        --head "$(git branch --show-current)" --title "$title" \
+        --body-file "$ARTIFACTS_DIR/pr-body.md")
+      gh issue edit "$ARGUMENTS" --repo dynamous-business/archon-local-crew \
+        --add-label crew:pr-open >/dev/null 2>&1 || true
+      echo "PR=$url"

@@ -1,0 +1,6 @@
+# ProArt local crew: every node runs on the local llama-server through Pi. No cloud model.
+defaultAssistant: pi
+assistants:
+  pi:
+    model: proart/qwen3.8-flash-next
+    maxConcurrent: 4

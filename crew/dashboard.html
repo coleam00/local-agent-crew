@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Agent Crew</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #07090F; --surface: #0E1525; --surface2: #121b30; --line: rgba(147,161,184,.14);
+    --ink: #F5F7FB; --ink2: #93A1B8; --accent: #3B82F6; --accent-light: #60A5FA; --good: #34D399; --bad: #F87171;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: Inter, system-ui, sans-serif; }
+  body { background: radial-gradient(1200px 700px at 80% -10%, rgba(30,58,138,.35), transparent 60%), var(--bg); }
+  .wrap { max-width: 1500px; margin: 0 auto; padding: 28px 32px 32px; display: grid; gap: 28px; min-height: 100vh; box-sizing: border-box; align-content: center; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .title { display: flex; align-items: center; gap: 14px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 0 rgba(52,211,153,.6); animation: pulse 2s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52,211,153,.55); } 70% { box-shadow: 0 0 0 12px rgba(52,211,153,0); } 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); } }
+  h1 { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -.01em; }
+  .sub { color: var(--ink2); font-size: 15px; margin-top: 2px; }
+  .clock { font-family: 'JetBrains Mono', monospace; font-size: 40px; font-weight: 600; letter-spacing: .02em; }
+  .clock small { display: block; font-family: Inter; font-size: 13px; color: var(--ink2); text-align: right; letter-spacing: 0; font-weight: 500; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .card { background: linear-gradient(180deg, var(--surface2), var(--surface)); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; min-width: 0; }
+  .label { color: var(--ink2); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
+  .big { font-size: 46px; font-weight: 800; letter-spacing: -.02em; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .unit { font-size: 15px; color: var(--ink2); font-weight: 500; margin-left: 6px; letter-spacing: 0; }
+  .agents { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .agent { position: relative; overflow: hidden; }
+  .agent .bar { position: absolute; left: 0; top: 0; height: 3px; width: 100%; background: linear-gradient(90deg, transparent, var(--accent-light), transparent); animation: scan 2.4s linear infinite; }
+  @keyframes scan { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  .agent .who { display: flex; justify-content: space-between; align-items: baseline; }
+  .agent .num { font-family: 'JetBrains Mono', monospace; color: var(--accent-light); font-size: 15px; font-weight: 600; }
+  .agent .t { font-size: 17px; font-weight: 600; margin: 8px 0 12px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 44px; }
+  .step { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; padding: 5px 11px; border-radius: 999px; background: rgba(59,130,246,.14); color: var(--accent-light); }
+  .idle { color: var(--ink2); font-size: 15px; padding: 18px 0 6px; }
+  .split { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; }
+  .cost { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .cost .big { font-size: 56px; }
+  .cloud .big { color: var(--ink); }
+  .local .big { color: var(--good); }
+  .note { color: var(--ink2); font-size: 13px; margin-top: 8px; line-height: 1.45; }
+  .meter { height: 12px; border-radius: 999px; background: rgba(147,161,184,.14); overflow: hidden; margin-top: 14px; }
+  .meter > div { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-light)); border-radius: 999px; transition: width .8s ease; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  /* ?v=1: a vertical (4:5) layout for the LinkedIn cut, filling the window top to bottom */
+  /* exact 4:5 box centred in a full-screen window: record the centre (height x 0.8*height) region */
+  /* The box is the recording region on a 2400-tall screen: 1600x2000 physical px starting at y=150,
+     centred, i.e. width 66.67vh, height 83.33vh, top 6.25vh. It stays clear of the floating overlay
+     near the bottom of the screen. */
+  /* zoom .7 shrinks everything inside; box sizes are divided by .7 so it still lands on the region */
+  body.v .wrap { box-sizing: border-box; width: 85.47vh; height: 106.83vh; max-width: none; zoom: .78;
+                 margin: 8.01vh auto 0; padding: 2.4vh 2.2vh; gap: 1.4vh; overflow: hidden;
+                 grid-template-rows: auto auto auto auto auto 1fr; }
+  body.v header { flex-wrap: nowrap; }
+  body.v .card { padding: 1.3vh 1.5vh; border-radius: 1.2vh; }
+  body.v .agents, body.v .grid4, body.v .cost, body.v .split { gap: 1.4vh; }
+  body.v h1 { font-size: 2.6vh; } body.v .clock { font-size: 2.8vh; white-space: nowrap; } body.v .clock small { font-size: 1.1vh; }
+  body.v .big { font-size: 4.4vh; margin-top: .4vh; } body.v .cost .big { font-size: 5vh; }
+  body.v .agent .t { font-size: 1.6vh; margin: .6vh 0 .9vh; min-height: 3.6vh; }
+  body.v .step { font-size: 1.2vh; } body.v .label { font-size: 1.1vh; } body.v .note, body.v .sub { font-size: 1.25vh; }
+  body.v .unit { font-size: 1.4vh; } body.v .meter { height: 1vh; margin-top: 1vh; }
+  body.v .agents { grid-template-columns: 1fr 1fr; }
+  body.v .grid4 { grid-template-columns: 1fr 1fr; }
+  body.v .split { grid-template-columns: 1fr; }
+  body.v .cost { grid-template-columns: 1fr 1fr; }
+  body.v h1 { font-size: 3.2vh; } body.v .clock { font-size: 4.4vh; }
+  body.v .big { font-size: 5.6vh; } body.v .cost .big { font-size: 6.4vh; }
+  body.v .agent .t { font-size: 2vh; } body.v .label { font-size: 1.4vh; } body.v .note, body.v .sub { font-size: 1.6vh; }
+  @media (max-width: 1100px) { .grid4 { grid-template-columns: repeat(2, 1fr); } .split, .cost { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) { .wrap { padding: 16px; } .grid4 { grid-template-columns: 1fr; } .clock { font-size: 28px; } .big { font-size: 36px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title">
+      <div class="dot"></div>
+      <div>
+        <h1>Local agent crew</h1>
+        <div class="sub" id="sub">ASUS ProArt P16 · working through Archon's GitHub issues</div>
+      </div>
+    </div>
+    <div class="clock" id="clock">--:--:--<small id="runfor"></small></div>
+  </header>
+
+  <section>
+    <div class="label" style="margin-bottom:12px" id="agentsLabel">Agents working now</div>
+    <div class="agents" id="agents"></div>
+  </section>
+
+  <section class="grid4">
+    <div class="card"><div class="label">Tokens read</div><div class="big" id="tin">0</div></div>
+    <div class="card"><div class="label">Tokens written</div><div class="big" id="tout">0</div></div>
+    <div class="card"><div class="label">Issues worked</div><div class="big" id="issues">0</div></div>
+    <div class="card"><div class="label">PRs opened</div><div class="big" id="prs">0</div></div>
+  </section>
+
+  <section class="split">
+    <div class="cost">
+      <div class="card cloud"><div class="label">Same model, cloud API</div><div class="big" id="cloud">$0.00</div><div class="note" id="cloudNote"></div></div>
+      <div class="card local"><div class="label">On this laptop</div><div class="big" id="local">$0.00</div><div class="note" id="localNote"></div></div>
+    </div>
+    <div class="card">
+      <div class="label">Unified memory in use by the GPU</div>
+      <div class="big"><span id="mem">0</span><span class="unit">GB of 128 GB</span></div>
+      <div class="meter"><div id="memBar" style="width:0%"></div></div>
+      <div class="note"><span class="mono" id="tps">-</span> tokens/s generated right now · <span class="mono" id="watts">-</span> W GPU</div>
+    </div>
+  </section>
+</div>
+<script>
+  if (new URLSearchParams(location.search).get('v') === '1') document.body.classList.add('v');
+  const fmt = n => n >= 1e9 ? (n/1e9).toFixed(2) + 'B' : n >= 1e6 ? (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? (n/1e3).toFixed(1) + 'K' : String(Math.round(n));
+  const money = v => '$' + (v < 10 ? v.toFixed(2) : v.toFixed(1));
+  const steps = { fetch: 'Reading the issue', triage: 'Finding the root cause', report: 'Posting what it found',
+                  build: 'Writing the fix', implement: 'Writing the fix', check: 'Running the tests', review: 'Reviewing its own diff',
+                  'open-pr': 'Opening a PR', starting: 'Starting up' };
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function tick() { document.getElementById('clock').firstChild.nodeValue = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'}); }
+  setInterval(tick, 1000); tick();
+  async function load() {
+    try {
+      const s = await (await fetch('/api/state', {cache: 'no-store'})).json();
+      if (s.model) document.getElementById('sub').textContent = document.body.classList.contains('v')
+        ? `ASUS ProArt P16 · ${s.model}` : `ASUS ProArt P16 · ${s.model} · working through Archon's GitHub issues`;
+      const h = s.hours; document.getElementById('runfor').textContent = h ? `running for ${h >= 1 ? Math.floor(h) + 'h ' : ''}${Math.round((h % 1) * 60)}m` : '';
+      document.getElementById('agentsLabel').textContent = `Agents working now · ${s.agents.length} of ${s.agents_max || s.agents.length}`;
+      document.getElementById('agents').innerHTML = s.agents.length ? s.agents.map(a => `
+        <div class="card agent"><div class="bar"></div>
+          <div class="who"><span class="label">Issue</span><span class="num">#${a.issue}</span></div>
+          <div class="t">${esc(a.title)}</div>
+          <span class="step">${esc(steps[a.node] || a.node || 'Working')}</span>
+        </div>`).join('') : '<div class="idle">Waiting for the next issue</div>';
+      document.getElementById('tin').textContent = fmt(s.tok_in);
+      document.getElementById('tout').textContent = fmt(s.tok_out);
+      document.getElementById('issues').textContent = s.issues;
+      document.getElementById('prs').textContent = s.prs;
+      document.getElementById('cloud').textContent = money(s.cloud_usd);
+      document.getElementById('local').textContent = money(s.power_usd);
+      document.getElementById('cloudNote').textContent = `${s.model || 'Same model'} through a cloud API, price checked ${(s.price_checked || '').slice(0, 10)}`;
+      document.getElementById('localNote').textContent = `Electricity, ${s.kwh.toFixed(2)} kWh` + (s.calibrated ? '' : ' (GPU power only)');
+      document.getElementById('mem').textContent = s.gpu_mem_gb;
+      document.getElementById('memBar').style.width = Math.min(100, s.gpu_mem_gb / 128 * 100) + '%';
+      document.getElementById('tps').textContent = s.tps ?? '-';
+      document.getElementById('watts').textContent = s.gpu_w ?? '-';
+    } catch (e) { /* keep the last frame on a blip */ }
+  }
+  setInterval(load, 2000); load();
+</script>
+</body>
+</html>

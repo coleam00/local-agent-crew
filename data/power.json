@@ -1,0 +1,39 @@
+{
+ "run_start": "2026-11-19T09:56:40",
+ "model_label": "Qwen3.8-Flash-Next",
+ "usd_per_kwh": 0.169,
+ "usd_per_kwh_source": "EIA Electric Power Monthly, Minnesota residential average, May 2026 (16.9 cents/kWh), via https://electricrates.org/states/report/2026-05/",
+ "calibrated": true,
+ "k": 2.0665,
+ "base_w": 13.81,
+ "calibration_note": "Fitted 2026-11-20 14:08 from 96 on-battery samples: laptop_w = 2.067 * gpu_w + 13.81 (battery discharge rate vs nvidia-smi).",
+ "exclude_windows": [
+  [
+   "2026-11-20T13:52:00",
+   "2026-11-20T14:09:00"
+  ],
+  [
+   "2026-11-20T14:47:24",
+   "2026-11-20T15:19:33"
+  ],
+  [
+   "2026-11-21T09:43:18",
+   "2026-11-21T09:43:28"
+  ],
+  [
+   "2026-11-21T09:43:28",
+   "2026-11-21T09:59:07"
+  ],
+  [
+   "2026-11-21T10:38:13",
+   "2026-11-21T10:49:16"
+  ]
+ ],
+ "exclude_windows_note": "Synthetic 4-way bench load during the on-battery power calibration; not crew work, so its tokens are excluded.",
+ "exclude_windows_notes": [
+  "2026-11-20T14:47:24..2026-11-20T15:19:33: B-roll session (agents re-worked issues [143, 9, 109, 6] for the screen recording, nothing posted); not crew results.",
+  "2026-11-21T09:43:18..2026-11-21T09:43:28: B-roll session (agents re-worked issues [313, 304, 299, 310] for the screen recording, nothing posted); not crew results.",
+  "2026-11-21T09:43:28..2026-11-21T09:59:07: B-roll session (agents re-worked issues [109, 51, 16, 59] for the screen recording, nothing posted); not crew results.",
+  "2026-11-21T10:38:13..2026-11-21T10:49:16: B-roll session (agents re-worked issues [109, 51, 16, 59] for the screen recording, nothing posted); not crew results."
+ ]
+}

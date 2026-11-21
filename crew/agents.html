@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agents at work</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#07090F; --s1:#111a2e; --s2:#0c1322; --line:rgba(147,161,184,.16); --ink:#F5F7FB; --ink2:#93A1B8;
+          --ink3:#5d6b84; --accent:#3B82F6; --light:#60A5FA; --good:#34D399; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font-family:Inter,system-ui,sans-serif; overflow:hidden; }
+  body { background: radial-gradient(1100px 700px at 50% -8%, rgba(30,58,138,.38), transparent 62%), var(--bg); }
+  /* Recording region: 1080x1060 composite = physical 2240x2200 on the 3840x2400 panel, at x 800, y 100. */
+  .frame { position:absolute; left:50%; transform:translateX(-50%); top:4.17vh; width:93.33vh; height:91.67vh;
+           display:grid; grid-template-rows:auto 1fr; row-gap:3vh; padding:3.6vh 2.4vh 2vh; }
+  header { text-align:center; }
+  h1 { margin:0; font-size:4.3vh; font-weight:800; letter-spacing:-.01em; line-height:1.15; }
+  .sub { margin-top:1vh; font-size:2.2vh; font-weight:600; color:var(--ink2); }
+  .sub b { color:var(--light); font-weight:700; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:1.8vh; min-height:0; }
+  .agent { background:linear-gradient(180deg,var(--s1),var(--s2)); border:1px solid var(--line); border-radius:2vh;
+           padding:2.2vh 2.2vh 1.6vh; display:grid; grid-template-rows:auto auto auto 1fr; row-gap:1.4vh; min-height:0; overflow:hidden; }
+  .name { text-align:center; font-size:1.55vh; font-weight:700; color:var(--ink2); letter-spacing:.02em; }
+  .t { text-align:center; font-size:2.05vh; font-weight:700; line-height:1.3; min-height:5.3vh;
+       display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  /* four-step progress: a segmented bar with the step names under it */
+  .steps { display:grid; grid-template-columns:repeat(4,1fr); column-gap:.6vh; }
+  .seg { height:.55vh; border-radius:.3vh; background:rgba(147,161,184,.18); }
+  .seg.done { background:rgba(96,165,250,.55); }
+  .seg.now { background:var(--light); box-shadow:0 0 1.2vh rgba(96,165,250,.55); }
+  .lab { margin-top:.8vh; text-align:center; font-size:1.25vh; font-weight:600; color:var(--ink3); }
+  .lab.now { color:var(--ink); }
+  .feed { font-family:'JetBrains Mono',monospace; font-size:1.3vh; line-height:1.6; min-height:0; overflow:hidden;
+          display:flex; flex-direction:column; justify-content:flex-end; color:var(--ink);
+          -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 30%); mask-image:linear-gradient(to bottom,transparent 0,#000 30%); }
+  .row { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex-shrink:0; }  /* never squash rows when the feed overflows */
+  .row .tool { color:var(--light); display:inline-block; width:5.5ch; }
+  .row.think { color:var(--ink2); font-style:italic; }
+  .row.new { animation:in .4s ease-out; }
+  @keyframes in { from { opacity:0; transform:translateY(.6vh); } to { opacity:1; transform:none; } }
+  .idle { text-align:center; color:var(--ink2); font-size:1.7vh; align-self:center; grid-row:2 / span 3; }
+</style>
+</head>
+<body>
+<div class="frame">
+  <header>
+    <h1>Local agent crew on the ASUS ProArt P16</h1>
+    <div class="sub">Running <b>Qwen3.8-Flash-Next</b> (125B parameters)</div>
+  </header>
+  <div class="grid" id="grid"></div>
+</div>
+<script>
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const STEPS = ['Root cause', 'Write fix', 'Run tests', 'Open PR'];
+  const STEP_OF = { fetch:0, triage:0, report:0, build:1, implement:1, check:2, review:2, 'open-pr':3 };
+  const seen = {};
+  function steps(node) {
+    const k = STEP_OF[node] ?? 0;
+    const segs = STEPS.map((_, i) => `<div class="seg ${i < k ? 'done' : i === k ? 'now' : ''}"></div>`).join('');
+    const labs = STEPS.map((s, i) => `<div class="lab ${i === k ? 'now' : ''}">${s}</div>`).join('');
+    return `<div class="steps">${segs}${labs}</div>`;
+  }
+  async function load() {
+    try {
+      const d = await (await fetch('/api/agents', {cache:'no-store'})).json();
+      const slots = [0,1,2,3].map(i => d.agents.find(a => a.slot === i));
+      document.getElementById('grid').innerHTML = slots.map((a, i) => {
+        if (!a) return `<div class="agent"><div class="name">Agent ${i+1}</div><div class="idle">Waiting for the next issue</div></div>`;
+        const prev = seen[i] || {}; seen[i] = {};
+        const rows = a.lines.map((l, j) => {
+          const id = a.issue + ':' + (l.tool || '') + l.t; /* keyed by content, not position: a scroll must not re-animate every row */ seen[i][id] = 1; const cls = prev[id] ? '' : ' new';
+          return l.k === 'tool' ? `<div class="row${cls}"><span class="tool">${esc(l.tool)}</span>${esc(l.t)}</div>`
+                                : `<div class="row think${cls}">${esc(l.t)}</div>`;
+        }).join('');
+        return `<div class="agent"><div class="name">Agent ${i+1}</div><div class="t">${esc(a.title)}</div>${steps(a.node)}<div class="feed">${rows}</div></div>`;
+      }).join('');
+    } catch (e) {}
+  }
+  setInterval(load, 1500); load();
+</script>
+</body>
+</html>

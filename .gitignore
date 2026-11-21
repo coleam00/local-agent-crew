@@ -1,0 +1,16 @@
+data/logs/
+data/run-logs/
+data/test-runs/
+data/*.out
+data/pids.json
+data/running.json
+data/STOP
+__pycache__/
+# internal state, not needed to reproduce the numbers
+data/mirror_state.json
+data/fork_to_standalone.json
+data/attempts.json
+data/display_override*.json
+data/broll-logs/
+data/broll_session.json
+data/fork-backup/
